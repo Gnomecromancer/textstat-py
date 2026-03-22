@@ -1,4 +1,4 @@
-"""Text statistics: word count, sentence count, top words, reading time."""
+"""Text statistics: word count, sentence count, top words, reading time, readability."""
 
 import re
 import sys
@@ -52,6 +52,104 @@ def reading_time(text: str, wpm: int = 200) -> float:
     return round(words / wpm, 2)
 
 
+def count_syllables(word: str) -> int:
+    """Estimate syllable count for a single English word using vowel-group heuristic."""
+    word = re.sub(r"[^a-z]", "", word.lower())
+    if not word:
+        return 0
+    count = len(re.findall(r"[aeiou]+", word))
+    # silent trailing 'e' — only subtract if word has more than one syllable group
+    if word.endswith("e") and count > 1:
+        count -= 1
+    # 'le' ending after a consonant counts as a syllable even without a vowel group
+    if word.endswith("le") and len(word) > 2 and word[-3] not in "aeiou":
+        count += 1
+    return max(1, count)
+
+
+def total_syllables(text: str) -> int:
+    """Count total syllables across all words in text."""
+    words = re.findall(r"[A-Za-z']+", text)
+    return sum(count_syllables(w) for w in words)
+
+
+def flesch_reading_ease(text: str) -> float:
+    """Flesch Reading Ease score (0–100; higher = easier to read)."""
+    words = count_words(text)
+    sentences = count_sentences(text)
+    syllables = total_syllables(text)
+    if words == 0 or sentences == 0:
+        return 0.0
+    score = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words)
+    return round(score, 2)
+
+
+def flesch_kincaid_grade(text: str) -> float:
+    """Flesch-Kincaid Grade Level — US school grade needed to understand the text."""
+    words = count_words(text)
+    sentences = count_sentences(text)
+    syllables = total_syllables(text)
+    if words == 0 or sentences == 0:
+        return 0.0
+    grade = 0.39 * (words / sentences) + 11.8 * (syllables / words) - 15.59
+    return round(grade, 2)
+
+
+def lexical_diversity(text: str) -> float:
+    """Type-token ratio: unique words / total words (0.0–1.0)."""
+    words = re.findall(r"[A-Za-z']+", text.lower())
+    if not words:
+        return 0.0
+    return round(len(set(words)) / len(words), 3)
+
+
+def count_complex_words(text: str) -> int:
+    """Count words with 3 or more syllables (polysyllabic words used in Gunning Fog)."""
+    words = re.findall(r"[A-Za-z']+", text)
+    return sum(1 for w in words if count_syllables(w) >= 3)
+
+
+def gunning_fog(text: str) -> float:
+    """Gunning Fog Index — estimated years of schooling to understand the text.
+
+    Formula: 0.4 * ((words/sentences) + 100 * (complex_words/words))
+    Typical values: 6 (plain English) to 17+ (academic/legal).
+    """
+    words = count_words(text)
+    sentences = count_sentences(text)
+    complex_words = count_complex_words(text)
+    if words == 0 or sentences == 0:
+        return 0.0
+    score = 0.4 * ((words / sentences) + 100 * (complex_words / words))
+    return round(score, 2)
+
+
+def sentence_lengths(text: str) -> list:
+    """Return a list of word counts for each sentence in text."""
+    parts = re.split(r'[.!?]+', text.strip())
+    return [len(p.split()) for p in parts if p.strip()]
+
+
+def sentence_stats(text: str) -> dict:
+    """Return min/max/mean/median sentence length (in words).
+
+    Returns all-zero dict for empty or single-word input.
+    """
+    lengths = sentence_lengths(text)
+    if not lengths:
+        return {"min": 0, "max": 0, "mean": 0.0, "median": 0.0}
+    n = len(lengths)
+    s = sorted(lengths)
+    mid = n // 2
+    median = float(s[mid]) if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+    return {
+        "min": min(lengths),
+        "max": max(lengths),
+        "mean": round(sum(lengths) / n, 2),
+        "median": median,
+    }
+
+
 def analyze(text: str) -> dict:
     """Return a combined stats dict for the given text."""
     return {
@@ -62,6 +160,11 @@ def analyze(text: str) -> dict:
         "avg_word_length": round(avg_word_length(text), 2),
         "reading_time_min": reading_time(text),
         "top_words": top_words(text, 5),
+        "flesch_reading_ease": flesch_reading_ease(text),
+        "flesch_kincaid_grade": flesch_kincaid_grade(text),
+        "lexical_diversity": lexical_diversity(text),
+        "gunning_fog": gunning_fog(text),
+        "sentence_stats": sentence_stats(text),
     }
 
 
@@ -72,6 +175,15 @@ def _format_report(stats: dict, source: str) -> str:
     lines.append(f"  Sentences        : {stats['sentences']}")
     lines.append(f"  Avg word length  : {stats['avg_word_length']}")
     lines.append(f"  Reading time     : {stats['reading_time_min']} min")
+    lines.append(f"  Flesch ease      : {stats['flesch_reading_ease']}  (0=hard, 100=easy)")
+    lines.append(f"  FK grade level   : {stats['flesch_kincaid_grade']}")
+    lines.append(f"  Gunning Fog      : {stats['gunning_fog']}  (years of schooling)")
+    lines.append(f"  Lexical diversity: {stats['lexical_diversity']}  (unique/total words)")
+    ss = stats["sentence_stats"]
+    lines.append(
+        f"  Sentence lengths : min={ss['min']}  max={ss['max']}  "
+        f"mean={ss['mean']}  median={ss['median']}  words"
+    )
     if stats["top_words"]:
         top = ", ".join(f"{w}({c})" for w, c in stats["top_words"])
         lines.append(f"  Top words        : {top}")
