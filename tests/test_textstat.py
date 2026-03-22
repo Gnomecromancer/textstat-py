@@ -18,6 +18,9 @@ from textstat import (
     gunning_fog,
     sentence_lengths,
     sentence_stats,
+    coleman_liau_index,
+    automated_readability_index,
+    grade_level_consensus,
 )
 
 SAMPLE = (
@@ -327,6 +330,99 @@ class TestSentenceStats:
         assert set(result.keys()) == {"min", "max", "mean", "median"}
 
 
+class TestColemanLiauIndex:
+    def test_empty(self):
+        assert coleman_liau_index("") == 0.0
+
+    def test_returns_float(self):
+        result = coleman_liau_index(SAMPLE)
+        assert isinstance(result, float)
+
+    def test_complex_text_higher_grade(self):
+        simple = "The cat sat. The dog ran. I am here."
+        hard = (
+            "The administration's unprecedented infrastructural deterioration "
+            "necessitates comprehensive rehabilitation assessment."
+        )
+        assert coleman_liau_index(hard) > coleman_liau_index(simple)
+
+    def test_reasonable_range(self):
+        # Typical prose: grade 1–20
+        result = coleman_liau_index(SAMPLE)
+        assert -5 <= result <= 25
+
+    def test_formula_driven(self):
+        # Verify the formula: longer words → higher L → higher index
+        short_words = "I go do it so am up."
+        long_words = "Extraordinary administrative responsibilities necessitate comprehensive understanding."
+        assert coleman_liau_index(long_words) > coleman_liau_index(short_words)
+
+
+class TestAutomatedReadabilityIndex:
+    def test_empty(self):
+        assert automated_readability_index("") == 0.0
+
+    def test_returns_float(self):
+        result = automated_readability_index(SAMPLE)
+        assert isinstance(result, float)
+
+    def test_complex_text_higher_ari(self):
+        simple = "The cat sat. The dog ran. I am here."
+        hard = (
+            "Unprecedented infrastructural deterioration necessitates "
+            "comprehensive rehabilitation immediately."
+        )
+        assert automated_readability_index(hard) > automated_readability_index(simple)
+
+    def test_reasonable_range(self):
+        result = automated_readability_index(SAMPLE)
+        assert -5 <= result <= 30
+
+    def test_single_sentence_no_crash(self):
+        # Edge case: one sentence, multiple words
+        result = automated_readability_index("Hello world today.")
+        assert isinstance(result, float)
+
+
+class TestGradeLevelConsensus:
+    def test_empty(self):
+        assert grade_level_consensus("") == 0.0
+
+    def test_whitespace_only(self):
+        assert grade_level_consensus("   ") == 0.0
+
+    def test_returns_float(self):
+        result = grade_level_consensus(SAMPLE)
+        assert isinstance(result, float)
+
+    def test_complex_text_higher_consensus(self):
+        simple = "The cat sat. The dog ran. I am here."
+        hard = (
+            "Unprecedented infrastructural deterioration necessitates "
+            "comprehensive rehabilitation immediately."
+        )
+        assert grade_level_consensus(hard) > grade_level_consensus(simple)
+
+    def test_reasonable_range(self):
+        result = grade_level_consensus(SAMPLE)
+        assert -5 <= result <= 25
+
+    def test_is_average_of_four_formulas(self):
+        # consensus must equal mean of FK, Fog, Coleman-Liau, ARI
+        text = SAMPLE
+        expected = round(
+            (
+                flesch_kincaid_grade(text)
+                + gunning_fog(text)
+                + coleman_liau_index(text)
+                + automated_readability_index(text)
+            )
+            / 4,
+            1,
+        )
+        assert grade_level_consensus(text) == expected
+
+
 class TestAnalyze:
     def test_returns_all_keys(self):
         result = analyze(SAMPLE)
@@ -336,6 +432,7 @@ class TestAnalyze:
             "reading_time_min", "top_words",
             "flesch_reading_ease", "flesch_kincaid_grade",
             "lexical_diversity", "gunning_fog", "sentence_stats",
+            "coleman_liau", "automated_readability_index", "grade_level_consensus",
         }
         assert expected_keys == set(result.keys())
 
@@ -366,3 +463,9 @@ class TestAnalyze:
         ss = result["sentence_stats"]
         assert isinstance(ss, dict)
         assert "min" in ss and "max" in ss and "mean" in ss and "median" in ss
+
+    def test_new_readability_metrics_present(self):
+        result = analyze(SAMPLE)
+        assert isinstance(result["coleman_liau"], float)
+        assert isinstance(result["automated_readability_index"], float)
+        assert isinstance(result["grade_level_consensus"], float)

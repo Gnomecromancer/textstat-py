@@ -131,10 +131,7 @@ def sentence_lengths(text: str) -> list:
 
 
 def sentence_stats(text: str) -> dict:
-    """Return min/max/mean/median sentence length (in words).
-
-    Returns all-zero dict for empty or single-word input.
-    """
+    """Return min/max/mean/median sentence length (in words)."""
     lengths = sentence_lengths(text)
     if not lengths:
         return {"min": 0, "max": 0, "mean": 0.0, "median": 0.0}
@@ -148,6 +145,53 @@ def sentence_stats(text: str) -> dict:
         "mean": round(sum(lengths) / n, 2),
         "median": median,
     }
+
+
+def coleman_liau_index(text: str) -> float:
+    """Coleman-Liau Index — grade level based on letters and sentences per 100 words.
+
+    Formula: 0.0588 * L - 0.296 * S - 15.8
+    L = avg letters per 100 words; S = avg sentences per 100 words.
+    """
+    words = count_words(text)
+    sentences = count_sentences(text)
+    if words == 0:
+        return 0.0
+    letters = sum(1 for c in text if c.isalpha())
+    L = (letters / words) * 100
+    S = (sentences / words) * 100
+    score = 0.0588 * L - 0.296 * S - 15.8
+    return round(score, 2)
+
+
+def automated_readability_index(text: str) -> float:
+    """Automated Readability Index (ARI) — grade level from chars/words and words/sentences.
+
+    Formula: 4.71 * (chars/words) + 0.5 * (words/sentences) - 21.43
+    """
+    words = count_words(text)
+    sentences = count_sentences(text)
+    if words == 0 or sentences == 0:
+        return 0.0
+    chars = sum(1 for c in text if c.isalpha())
+    score = 4.71 * (chars / words) + 0.5 * (words / sentences) - 21.43
+    return round(score, 2)
+
+
+def grade_level_consensus(text: str) -> float:
+    """Mean grade level from all four grade-level formulas (FK, Fog, Coleman-Liau, ARI).
+
+    Returns 0.0 for empty text.
+    """
+    if not text.strip():
+        return 0.0
+    scores = [
+        flesch_kincaid_grade(text),
+        gunning_fog(text),
+        coleman_liau_index(text),
+        automated_readability_index(text),
+    ]
+    return round(sum(scores) / len(scores), 1)
 
 
 def analyze(text: str) -> dict:
@@ -165,6 +209,9 @@ def analyze(text: str) -> dict:
         "lexical_diversity": lexical_diversity(text),
         "gunning_fog": gunning_fog(text),
         "sentence_stats": sentence_stats(text),
+        "coleman_liau": coleman_liau_index(text),
+        "automated_readability_index": automated_readability_index(text),
+        "grade_level_consensus": grade_level_consensus(text),
     }
 
 
@@ -178,6 +225,9 @@ def _format_report(stats: dict, source: str) -> str:
     lines.append(f"  Flesch ease      : {stats['flesch_reading_ease']}  (0=hard, 100=easy)")
     lines.append(f"  FK grade level   : {stats['flesch_kincaid_grade']}")
     lines.append(f"  Gunning Fog      : {stats['gunning_fog']}  (years of schooling)")
+    lines.append(f"  Coleman-Liau     : {stats['coleman_liau']}")
+    lines.append(f"  ARI              : {stats['automated_readability_index']}")
+    lines.append(f"  Grade consensus  : {stats['grade_level_consensus']}  (avg of 4 formulas)")
     lines.append(f"  Lexical diversity: {stats['lexical_diversity']}  (unique/total words)")
     ss = stats["sentence_stats"]
     lines.append(
