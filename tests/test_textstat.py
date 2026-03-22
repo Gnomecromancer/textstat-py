@@ -29,6 +29,10 @@ from textstat import (
     sentiment_label,
     text_density,
     word_frequency_distribution,
+    herdan_c,
+    yule_k,
+    mattr,
+    vocabulary_richness,
 )
 
 SAMPLE = (
@@ -659,12 +663,10 @@ class TestWordFrequencyDistribution:
         assert 0.0 <= result["top_10_pct"] <= 1.0
 
     def test_top_10_pct_all_unique(self):
-        # 5 unique words, top 5 = all of them → top_10_pct = 1.0 (top 10 covers everything)
         result = word_frequency_distribution("alpha beta gamma delta epsilon")
         assert result["top_10_pct"] == 1.0
 
     def test_few_words_zipf_zero(self):
-        # fewer than 5 unique types → zipf_fit should be 0.0
         result = word_frequency_distribution("cat dog cat")
         assert result["zipf_fit"] == 0.0
 
@@ -673,7 +675,6 @@ class TestWordFrequencyDistribution:
         assert -1.0 <= result["zipf_fit"] <= 1.0
 
     def test_zipf_fit_negative_for_natural_text(self):
-        # Natural language follows Zipf's law: higher rank = lower frequency → negative correlation
         long_text = (
             "The quick brown fox jumps over the lazy dog. "
             "Pack my box with five dozen liquor jugs. "
@@ -683,6 +684,153 @@ class TestWordFrequencyDistribution:
         )
         result = word_frequency_distribution(long_text)
         assert result["zipf_fit"] < 0.0
+
+
+class TestHerdanC:
+    def test_empty(self):
+        assert herdan_c("") == 0.0
+
+    def test_single_token(self):
+        assert herdan_c("cat") == 0.0
+
+    def test_all_same(self):
+        # all same word → V=1, log(1)=0 → returns 0.0
+        assert herdan_c("cat cat cat cat cat") == 0.0
+
+    def test_all_unique(self):
+        # all unique → V=N → log(V)/log(N) = 1.0
+        result = herdan_c("alpha beta gamma delta epsilon")
+        assert result == pytest.approx(1.0, abs=0.001)
+
+    def test_range(self):
+        result = herdan_c(SAMPLE)
+        assert 0.0 <= result <= 1.0
+
+    def test_returns_float(self):
+        assert isinstance(herdan_c(SAMPLE), float)
+
+    def test_richer_text_higher_c(self):
+        # text with more unique words per token should have higher Herdan's C
+        repeated = "cat cat cat cat cat dog dog dog dog dog"
+        diverse = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        assert herdan_c(diverse) > herdan_c(repeated)
+
+    def test_longer_repeated_text(self):
+        # repeated tokens should give low C
+        text = " ".join(["word"] * 50)
+        result = herdan_c(text)
+        assert result < 0.3
+
+
+class TestYuleK:
+    def test_empty(self):
+        assert yule_k("") == 0.0
+
+    def test_all_same_word(self):
+        # all tokens same → V(m)=1 type with freq=N → K = 10^4*(N^2 - N)/N^2
+        # as N grows this approaches 10000; for small N it's smaller but positive
+        result = yule_k("cat cat cat cat cat")
+        assert result > 0.0
+
+    def test_all_unique(self):
+        # all unique → each type appears once → V(1)=N, all m=1
+        # numerator = 1*1*N - N = 0 → K = 0.0
+        result = yule_k("alpha beta gamma delta epsilon")
+        assert result == 0.0
+
+    def test_returns_float(self):
+        assert isinstance(yule_k(SAMPLE), float)
+
+    def test_repeated_text_higher_k(self):
+        # more repetition → higher K
+        repeated = " ".join(["cat"] * 20 + ["dog"] * 20)
+        diverse = " ".join([f"word{i}" for i in range(40)])
+        assert yule_k(repeated) > yule_k(diverse)
+
+    def test_non_negative(self):
+        # K is non-negative for any real text
+        for text in [SAMPLE, "cat dog", "the the the cat"]:
+            assert yule_k(text) >= 0.0
+
+    def test_single_word(self):
+        result = yule_k("hello")
+        assert result == 0.0
+
+
+class TestMattr:
+    def test_empty(self):
+        assert mattr("") == 0.0
+
+    def test_all_same(self):
+        result = mattr("cat cat cat cat cat", window=3)
+        assert result == pytest.approx(1 / 3, abs=0.01)
+
+    def test_all_unique_short(self):
+        # text shorter than window → uses full TTR
+        result = mattr("alpha beta gamma delta", window=100)
+        assert result == 1.0
+
+    def test_all_unique_equals_window(self):
+        # exactly window unique words → TTR=1.0 for that window
+        words = " ".join([f"w{i}" for i in range(10)])
+        result = mattr(words, window=10)
+        assert result == 1.0
+
+    def test_range(self):
+        result = mattr(SAMPLE)
+        assert 0.0 <= result <= 1.0
+
+    def test_returns_float(self):
+        assert isinstance(mattr(SAMPLE), float)
+
+    def test_window_sliding(self):
+        # 6 words: a b c a b c — window=3 → TTR for [a,b,c]=1.0, [b,c,a]=1.0, [c,a,b]=1.0, [a,b,c]=1.0
+        result = mattr("a b c a b c", window=3)
+        assert result == pytest.approx(1.0, abs=0.001)
+
+    def test_repeated_reduces_mattr(self):
+        diverse = " ".join([f"word{i}" for i in range(200)])
+        repeated = " ".join(["cat", "dog"] * 100)
+        assert mattr(diverse, window=50) > mattr(repeated, window=50)
+
+
+class TestVocabularyRichness:
+    def test_empty(self):
+        result = vocabulary_richness("")
+        assert result == {"ttr": 0.0, "herdan_c": 0.0, "yule_k": 0.0, "mattr": 0.0}
+
+    def test_returns_all_keys(self):
+        result = vocabulary_richness(SAMPLE)
+        assert set(result.keys()) == {"ttr", "herdan_c", "yule_k", "mattr"}
+
+    def test_ttr_matches_lexical_diversity(self):
+        from textstat import lexical_diversity
+        text = SAMPLE
+        assert vocabulary_richness(text)["ttr"] == lexical_diversity(text)
+
+    def test_herdan_c_matches(self):
+        text = SAMPLE
+        assert vocabulary_richness(text)["herdan_c"] == herdan_c(text)
+
+    def test_yule_k_matches(self):
+        text = SAMPLE
+        assert vocabulary_richness(text)["yule_k"] == yule_k(text)
+
+    def test_mattr_matches(self):
+        text = SAMPLE
+        assert vocabulary_richness(text)["mattr"] == mattr(text)
+
+    def test_all_values_floats(self):
+        result = vocabulary_richness(SAMPLE)
+        for v in result.values():
+            assert isinstance(v, float)
+
+    def test_ranges(self):
+        result = vocabulary_richness(SAMPLE)
+        assert 0.0 <= result["ttr"] <= 1.0
+        assert 0.0 <= result["herdan_c"] <= 1.0
+        assert result["yule_k"] >= 0.0
+        assert 0.0 <= result["mattr"] <= 1.0
 
 
 class TestAnalyze:
@@ -697,7 +845,7 @@ class TestAnalyze:
             "coleman_liau", "automated_readability_index", "grade_level_consensus",
             "smog_index", "hapax_legomena_ratio", "paragraph_stats",
             "sentiment_polarity", "sentiment_label", "text_density",
-            "word_frequency_distribution",
+            "word_frequency_distribution", "vocabulary_richness",
         }
         assert expected_keys == set(result.keys())
 
@@ -735,3 +883,10 @@ class TestAnalyze:
         assert isinstance(wfd, dict)
         assert "zipf_fit" in wfd
         assert "total_tokens" in wfd
+
+    def test_vocabulary_richness_in_analyze(self):
+        result = analyze(SAMPLE)
+        vr = result["vocabulary_richness"]
+        assert isinstance(vr, dict)
+        assert set(vr.keys()) == {"ttr", "herdan_c", "yule_k", "mattr"}
+        assert all(isinstance(v, float) for v in vr.values())

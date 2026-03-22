@@ -368,6 +368,80 @@ def word_frequency_distribution(text: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Vocabulary richness metrics
+# ---------------------------------------------------------------------------
+
+def herdan_c(text: str) -> float:
+    """Herdan's C — log-based vocabulary richness, less biased by text length than TTR.
+
+    C = log(V) / log(N) where V = unique word types, N = total tokens.
+    Range (0, 1]; closer to 1 means richer vocabulary relative to text length.
+    Returns 0.0 for texts with fewer than 2 tokens.
+    """
+    words = re.findall(r"[A-Za-z0-9']+", text.lower())
+    n = len(words)
+    if n < 2:
+        return 0.0
+    v = len(set(words))
+    if v < 2:
+        return 0.0
+    return round(math.log(v) / math.log(n), 3)
+
+
+def yule_k(text: str) -> float:
+    """Yule's K — vocabulary richness measure robust to text length.
+
+    K = 10^4 * (sum(m^2 * V(m)) - N) / N^2
+    where V(m) = number of word types occurring exactly m times, N = total tokens.
+    Lower K means richer vocabulary (words are distributed more evenly).
+    Returns 0.0 for empty text.
+    """
+    words = re.findall(r"[A-Za-z0-9']+", text.lower())
+    n = len(words)
+    if n == 0:
+        return 0.0
+    freq = Counter(words)
+    freq_of_freq = Counter(freq.values())
+    numerator = sum(m * m * fm for m, fm in freq_of_freq.items()) - n
+    return round(1e4 * numerator / (n * n), 2)
+
+
+def mattr(text: str, window: int = 100) -> float:
+    """Moving Average Type-Token Ratio (MATTR).
+
+    Slides a window of `window` tokens over the text, computes TTR per window,
+    and returns the mean.  More stable than global TTR for long texts.
+    Falls back to global TTR when text is shorter than the window size.
+    Returns 0.0 for empty text.
+    """
+    words = re.findall(r"[A-Za-z0-9']+", text.lower())
+    n = len(words)
+    if n == 0:
+        return 0.0
+    if n <= window:
+        return round(len(set(words)) / n, 3)
+    ttrs = [len(set(words[i:i + window])) / window for i in range(n - window + 1)]
+    return round(sum(ttrs) / len(ttrs), 3)
+
+
+def vocabulary_richness(text: str) -> dict:
+    """Bundle of vocabulary richness metrics beyond simple TTR.
+
+    Keys:
+        ``ttr``      — type-token ratio (same as lexical_diversity)
+        ``herdan_c`` — log-based richness, more stable across text lengths
+        ``yule_k``   — Yule's K; lower value = richer vocabulary
+        ``mattr``    — moving-average TTR (window=100 tokens)
+    """
+    return {
+        "ttr": lexical_diversity(text),
+        "herdan_c": herdan_c(text),
+        "yule_k": yule_k(text),
+        "mattr": mattr(text),
+    }
+
+
 def analyze(text: str) -> dict:
     """Return a combined stats dict for the given text."""
     return {
@@ -393,6 +467,7 @@ def analyze(text: str) -> dict:
         "sentiment_label": sentiment_label(text),
         "text_density": text_density(text),
         "word_frequency_distribution": word_frequency_distribution(text),
+        "vocabulary_richness": vocabulary_richness(text),
     }
 
 
@@ -418,6 +493,11 @@ def _format_report(stats: dict, source: str) -> str:
     lines.append(
         f"  Freq dist        : top10={wfd['top_10_pct']}  zipf_fit={wfd['zipf_fit']}"
         f"  ({wfd['unique_types']} types / {wfd['total_tokens']} tokens)"
+    )
+    vr = stats["vocabulary_richness"]
+    lines.append(
+        f"  Vocab richness   : ttr={vr['ttr']}  herdan_c={vr['herdan_c']}"
+        f"  yule_k={vr['yule_k']}  mattr={vr['mattr']}"
     )
     ss = stats["sentence_stats"]
     lines.append(
