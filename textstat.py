@@ -58,10 +58,8 @@ def count_syllables(word: str) -> int:
     if not word:
         return 0
     count = len(re.findall(r"[aeiou]+", word))
-    # silent trailing 'e' — only subtract if word has more than one syllable group
     if word.endswith("e") and count > 1:
         count -= 1
-    # 'le' ending after a consonant counts as a syllable even without a vowel group
     if word.endswith("le") and len(word) > 2 and word[-3] not in "aeiou":
         count += 1
     return max(1, count)
@@ -113,7 +111,6 @@ def gunning_fog(text: str) -> float:
     """Gunning Fog Index — estimated years of schooling to understand the text.
 
     Formula: 0.4 * ((words/sentences) + 100 * (complex_words/words))
-    Typical values: 6 (plain English) to 17+ (academic/legal).
     """
     words = count_words(text)
     sentences = count_sentences(text)
@@ -179,10 +176,7 @@ def automated_readability_index(text: str) -> float:
 
 
 def grade_level_consensus(text: str) -> float:
-    """Mean grade level from all four grade-level formulas (FK, Fog, Coleman-Liau, ARI).
-
-    Returns 0.0 for empty text.
-    """
+    """Mean grade level from all four grade-level formulas (FK, Fog, Coleman-Liau, ARI)."""
     if not text.strip():
         return 0.0
     scores = [
@@ -192,6 +186,59 @@ def grade_level_consensus(text: str) -> float:
         automated_readability_index(text),
     ]
     return round(sum(scores) / len(scores), 1)
+
+
+def smog_index(text: str) -> float:
+    """SMOG Grade (McLaughlin 1969) — Simple Measure of Gobbledygook.
+
+    Formula: 3 + sqrt(polysyllabic_words * (30 / sentences))
+    Returns 0.0 for texts with fewer than 3 sentences (insufficient data).
+    """
+    sentences = count_sentences(text)
+    if sentences < 3:
+        return 0.0
+    poly = count_complex_words(text)
+    score = 3 + (poly * (30 / sentences)) ** 0.5
+    return round(score, 2)
+
+
+def hapax_legomena_ratio(text: str) -> float:
+    """Proportion of words that appear exactly once (hapax legomena / total words).
+
+    Higher ratio indicates richer, more varied vocabulary.
+    Returns 0.0 for empty text.
+    """
+    words = re.findall(r"[A-Za-z']+", text.lower())
+    if not words:
+        return 0.0
+    freq = Counter(words)
+    hapax = sum(1 for count in freq.values() if count == 1)
+    return round(hapax / len(words), 3)
+
+
+def count_paragraphs(text: str) -> int:
+    """Count non-empty paragraphs (blocks separated by one or more blank lines)."""
+    paragraphs = re.split(r'\n\s*\n', text.strip())
+    return sum(1 for p in paragraphs if p.strip())
+
+
+def paragraph_stats(text: str) -> dict:
+    """Return word-count statistics per paragraph: count/min/max/mean.
+
+    Paragraphs are separated by blank lines. Single-block text counts as one paragraph.
+    Returns zeroed dict for empty text.
+    """
+    paragraphs = [p for p in re.split(r'\n\s*\n', text.strip()) if p.strip()]
+    if not paragraphs:
+        return {"count": 0, "min": 0, "max": 0, "mean": 0.0}
+    lengths = [count_words(p) for p in paragraphs]
+    n = len(lengths)
+    return {
+        "count": n,
+        "min": min(lengths),
+        "max": max(lengths),
+        "mean": round(sum(lengths) / n, 2),
+    }
 
 
 def analyze(text: str) -> dict:
@@ -212,6 +259,9 @@ def analyze(text: str) -> dict:
         "coleman_liau": coleman_liau_index(text),
         "automated_readability_index": automated_readability_index(text),
         "grade_level_consensus": grade_level_consensus(text),
+        "smog_index": smog_index(text),
+        "hapax_legomena_ratio": hapax_legomena_ratio(text),
+        "paragraph_stats": paragraph_stats(text),
     }
 
 
@@ -225,14 +275,20 @@ def _format_report(stats: dict, source: str) -> str:
     lines.append(f"  Flesch ease      : {stats['flesch_reading_ease']}  (0=hard, 100=easy)")
     lines.append(f"  FK grade level   : {stats['flesch_kincaid_grade']}")
     lines.append(f"  Gunning Fog      : {stats['gunning_fog']}  (years of schooling)")
+    lines.append(f"  SMOG index       : {stats['smog_index']}  (needs 3+ sentences)")
     lines.append(f"  Coleman-Liau     : {stats['coleman_liau']}")
     lines.append(f"  ARI              : {stats['automated_readability_index']}")
     lines.append(f"  Grade consensus  : {stats['grade_level_consensus']}  (avg of 4 formulas)")
     lines.append(f"  Lexical diversity: {stats['lexical_diversity']}  (unique/total words)")
+    lines.append(f"  Hapax legomena   : {stats['hapax_legomena_ratio']}  (once-only words / total)")
     ss = stats["sentence_stats"]
     lines.append(
         f"  Sentence lengths : min={ss['min']}  max={ss['max']}  "
         f"mean={ss['mean']}  median={ss['median']}  words"
+    )
+    ps = stats["paragraph_stats"]
+    lines.append(
+        f"  Paragraphs       : {ps['count']}  (min={ps['min']}  max={ps['max']}  mean={ps['mean']} words)"
     )
     if stats["top_words"]:
         top = ", ".join(f"{w}({c})" for w, c in stats["top_words"])

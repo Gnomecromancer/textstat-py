@@ -21,12 +21,22 @@ from textstat import (
     coleman_liau_index,
     automated_readability_index,
     grade_level_consensus,
+    smog_index,
+    hapax_legomena_ratio,
+    count_paragraphs,
+    paragraph_stats,
 )
 
 SAMPLE = (
     "The quick brown fox jumps over the lazy dog. "
     "Pack my box with five dozen liquor jugs. "
     "How valiantly did brave Zephyrus blow!"
+)
+
+MULTI_PARA = (
+    "The cat sat on the mat. The dog barked loudly.\n\n"
+    "A quick brown fox jumps over the lazy dog. Pack my box with five dozen jugs.\n\n"
+    "Simple short sentence."
 )
 
 
@@ -74,7 +84,6 @@ class TestCountSentences:
 
 class TestAvgWordLength:
     def test_uniform(self):
-        # "cat dog pig" — all 3-letter words
         assert avg_word_length("cat dog pig") == 3.0
 
     def test_mixed(self):
@@ -85,7 +94,6 @@ class TestAvgWordLength:
         assert avg_word_length("") == 0.0
 
     def test_ignores_punctuation(self):
-        # punctuation stripped; only letters counted
         result = avg_word_length("hi, hello!")
         assert abs(result - 3.5) < 0.01
 
@@ -137,7 +145,6 @@ class TestCountSyllables:
         assert count_syllables("garden") == 2
 
     def test_silent_e(self):
-        # "make" has 2 vowel groups (a, e) but silent trailing e → 1 syllable
         assert count_syllables("make") == 1
         assert count_syllables("time") == 1
 
@@ -149,13 +156,11 @@ class TestCountSyllables:
         assert count_syllables("") == 0
 
     def test_minimum_one(self):
-        # Any real word has at least 1 syllable
         assert count_syllables("rhythm") >= 1
 
 
 class TestTotalSyllables:
     def test_simple(self):
-        # "cat dog" = 1 + 1 = 2
         assert total_syllables("cat dog") == 2
 
     def test_empty(self):
@@ -182,9 +187,8 @@ class TestFleschReadingEase:
         assert flesch_reading_ease(simple) > flesch_reading_ease(complex_text)
 
     def test_reasonable_range(self):
-        # Standard English prose generally falls in 0–100
         result = flesch_reading_ease(SAMPLE)
-        assert -20 <= result <= 120  # allow slight overshoot from heuristic
+        assert -20 <= result <= 120
 
 
 class TestFleschKincaidGrade:
@@ -213,11 +217,9 @@ class TestLexicalDiversity:
         assert lexical_diversity("") == 0.0
 
     def test_all_unique(self):
-        # Every word is different → ratio = 1.0
         assert lexical_diversity("alpha beta gamma delta") == 1.0
 
     def test_all_same(self):
-        # Same word repeated → ratio = 1/n (rounds to low value)
         result = lexical_diversity("cat cat cat cat")
         assert result == 0.25
 
@@ -226,7 +228,6 @@ class TestLexicalDiversity:
         assert 0.0 <= result <= 1.0
 
     def test_case_insensitive(self):
-        # "Cat" and "cat" should be treated as the same word
         assert lexical_diversity("Cat cat CAT") == pytest.approx(1 / 3, abs=0.01)
 
 
@@ -235,11 +236,9 @@ class TestCountComplexWords:
         assert count_complex_words("") == 0
 
     def test_no_complex(self):
-        # all monosyllabic
         assert count_complex_words("cat dog fox ran") == 0
 
     def test_counts_polysyllabic(self):
-        # "beautiful" (3 syl), "education" (4 syl)
         result = count_complex_words("beautiful education cat")
         assert result == 2
 
@@ -264,17 +263,13 @@ class TestGunningFog:
         assert gunning_fog(hard) > gunning_fog(simple)
 
     def test_reasonable_range(self):
-        # Typical prose: 6–17
         result = gunning_fog(SAMPLE)
         assert 0 <= result <= 30
 
     def test_formula_correctness(self):
-        # One sentence, four words, one complex (3+ syl): "cat dog fox beautiful"
-        # words/sentences = 4/1 = 4; complex/words = 1/4 = 0.25
-        # fog = 0.4 * (4 + 100*0.25) = 0.4 * 29 = 11.6
         text = "cat dog fox beautiful"
         result = gunning_fog(text)
-        assert abs(result - 11.6) < 0.5  # allow syllable heuristic variance
+        assert abs(result - 11.6) < 0.5
 
 
 class TestSentenceLengths:
@@ -293,7 +288,6 @@ class TestSentenceLengths:
         assert len(lengths) == 3
 
     def test_no_punctuation(self):
-        # Treated as one sentence
         assert sentence_lengths("one two three four") == [4]
 
 
@@ -310,7 +304,6 @@ class TestSentenceStats:
         assert result["median"] == 3.0
 
     def test_two_sentences(self):
-        # "one two." (2 words) and "three four five." (3 words)
         result = sentence_stats("one two. three four five.")
         assert result["min"] == 2
         assert result["max"] == 3
@@ -318,7 +311,6 @@ class TestSentenceStats:
         assert result["median"] == 2.5
 
     def test_varied_lengths(self):
-        # 1, 3, 5 words → mean=3, median=3
         result = sentence_stats("go. one two three. alpha beta gamma delta epsilon.")
         assert result["min"] == 1
         assert result["max"] == 5
@@ -347,12 +339,10 @@ class TestColemanLiauIndex:
         assert coleman_liau_index(hard) > coleman_liau_index(simple)
 
     def test_reasonable_range(self):
-        # Typical prose: grade 1–20
         result = coleman_liau_index(SAMPLE)
         assert -5 <= result <= 25
 
     def test_formula_driven(self):
-        # Verify the formula: longer words → higher L → higher index
         short_words = "I go do it so am up."
         long_words = "Extraordinary administrative responsibilities necessitate comprehensive understanding."
         assert coleman_liau_index(long_words) > coleman_liau_index(short_words)
@@ -379,7 +369,6 @@ class TestAutomatedReadabilityIndex:
         assert -5 <= result <= 30
 
     def test_single_sentence_no_crash(self):
-        # Edge case: one sentence, multiple words
         result = automated_readability_index("Hello world today.")
         assert isinstance(result, float)
 
@@ -408,7 +397,6 @@ class TestGradeLevelConsensus:
         assert -5 <= result <= 25
 
     def test_is_average_of_four_formulas(self):
-        # consensus must equal mean of FK, Fog, Coleman-Liau, ARI
         text = SAMPLE
         expected = round(
             (
@@ -423,6 +411,150 @@ class TestGradeLevelConsensus:
         assert grade_level_consensus(text) == expected
 
 
+class TestSmogIndex:
+    def test_empty(self):
+        assert smog_index("") == 0.0
+
+    def test_fewer_than_3_sentences_returns_zero(self):
+        assert smog_index("One sentence only.") == 0.0
+        assert smog_index("One. Two.") == 0.0
+
+    def test_three_sentences_ok(self):
+        result = smog_index(SAMPLE)
+        assert isinstance(result, float)
+        assert result > 0.0
+
+    def test_complex_text_higher_smog(self):
+        # Build 3+ sentence texts so SMOG is valid
+        simple = "The cat sat. The dog ran. I am here. Go home now."
+        hard = (
+            "Unprecedented infrastructural deterioration necessitates comprehensive rehabilitation. "
+            "Administrative responsibilities necessitate extraordinary understanding. "
+            "Technological advancements revolutionize contemporary civilization. "
+            "Extraordinary complications necessitate sophisticated interventions."
+        )
+        assert smog_index(hard) > smog_index(simple)
+
+    def test_no_polysyllabic_words(self):
+        # All monosyllabic: SMOG = 3 + sqrt(0) = 3.0
+        text = "Cat sat. Dog ran. Fox hid. Pig ate. Hen flew."
+        result = smog_index(text)
+        assert result == pytest.approx(3.0, abs=0.1)
+
+    def test_formula_correctness(self):
+        # 3 sentences, exactly 3 complex words → poly * (30/3) = 3 * 10 = 30 → sqrt(30) ≈ 5.477
+        # smog = 3 + 5.477 ≈ 8.48
+        text = (
+            "Cat sat on mat. "
+            "Dog ran far away. "
+            "Beautiful education necessitates dedication."
+        )
+        result = smog_index(text)
+        # Allow variance due to syllable heuristic
+        assert 6.0 <= result <= 12.0
+
+    def test_returns_float(self):
+        result = smog_index(SAMPLE)
+        assert isinstance(result, float)
+
+
+class TestHapaxLegomenaRatio:
+    def test_empty(self):
+        assert hapax_legomena_ratio("") == 0.0
+
+    def test_all_unique_words(self):
+        # Every word appears once → ratio = total_hapax / total_words = 4/4 = 1.0
+        result = hapax_legomena_ratio("alpha beta gamma delta")
+        assert result == 1.0
+
+    def test_all_repeated(self):
+        # "cat cat cat" — no hapax → ratio = 0.0
+        result = hapax_legomena_ratio("cat cat cat")
+        assert result == 0.0
+
+    def test_mixed(self):
+        # "cat cat dog" — "dog" is hapax (1 out of 3 tokens)
+        result = hapax_legomena_ratio("cat cat dog")
+        assert result == pytest.approx(1 / 3, abs=0.01)
+
+    def test_case_insensitive(self):
+        # "Cat" and "cat" are the same word → not a hapax
+        result = hapax_legomena_ratio("Cat cat dog")
+        assert result == pytest.approx(1 / 3, abs=0.01)
+
+    def test_range(self):
+        result = hapax_legomena_ratio(SAMPLE)
+        assert 0.0 <= result <= 1.0
+
+    def test_high_diversity_text(self):
+        # SAMPLE has mostly unique words → ratio should be high
+        result = hapax_legomena_ratio(SAMPLE)
+        assert result > 0.5
+
+    def test_returns_float(self):
+        assert isinstance(hapax_legomena_ratio(SAMPLE), float)
+
+
+class TestCountParagraphs:
+    def test_empty(self):
+        assert count_paragraphs("") == 0
+
+    def test_single_block(self):
+        assert count_paragraphs("One sentence. Two sentences.") == 1
+
+    def test_two_paragraphs(self):
+        text = "First paragraph.\n\nSecond paragraph."
+        assert count_paragraphs(text) == 2
+
+    def test_three_paragraphs(self):
+        assert count_paragraphs(MULTI_PARA) == 3
+
+    def test_whitespace_only_lines_ignored(self):
+        text = "Para one.\n\n   \n\nPara two."
+        assert count_paragraphs(text) == 2
+
+    def test_multiple_blank_lines(self):
+        text = "First.\n\n\n\nSecond."
+        assert count_paragraphs(text) == 2
+
+
+class TestParagraphStats:
+    def test_empty(self):
+        result = paragraph_stats("")
+        assert result == {"count": 0, "min": 0, "max": 0, "mean": 0.0}
+
+    def test_single_paragraph(self):
+        result = paragraph_stats("one two three four five")
+        assert result["count"] == 1
+        assert result["min"] == 5
+        assert result["max"] == 5
+        assert result["mean"] == 5.0
+
+    def test_two_paragraphs(self):
+        text = "one two three.\n\none two three four five six."
+        result = paragraph_stats(text)
+        assert result["count"] == 2
+        assert result["min"] == 3
+        assert result["max"] == 6
+        assert result["mean"] == 4.5
+
+    def test_three_paragraphs(self):
+        result = paragraph_stats(MULTI_PARA)
+        assert result["count"] == 3
+        assert result["min"] >= 1
+        assert result["max"] >= result["min"]
+
+    def test_returns_all_keys(self):
+        result = paragraph_stats(SAMPLE)
+        assert set(result.keys()) == {"count", "min", "max", "mean"}
+
+    def test_mean_is_average(self):
+        # Two paragraphs: 2 words and 4 words → mean = 3.0
+        text = "one two.\n\nthree four five six."
+        result = paragraph_stats(text)
+        assert result["mean"] == 3.0
+
+
 class TestAnalyze:
     def test_returns_all_keys(self):
         result = analyze(SAMPLE)
@@ -433,6 +565,7 @@ class TestAnalyze:
             "flesch_reading_ease", "flesch_kincaid_grade",
             "lexical_diversity", "gunning_fog", "sentence_stats",
             "coleman_liau", "automated_readability_index", "grade_level_consensus",
+            "smog_index", "hapax_legomena_ratio", "paragraph_stats",
         }
         assert expected_keys == set(result.keys())
 
@@ -469,3 +602,18 @@ class TestAnalyze:
         assert isinstance(result["coleman_liau"], float)
         assert isinstance(result["automated_readability_index"], float)
         assert isinstance(result["grade_level_consensus"], float)
+
+    def test_smog_present(self):
+        result = analyze(SAMPLE)
+        assert isinstance(result["smog_index"], float)
+
+    def test_hapax_legomena_present(self):
+        result = analyze(SAMPLE)
+        assert isinstance(result["hapax_legomena_ratio"], float)
+        assert 0.0 <= result["hapax_legomena_ratio"] <= 1.0
+
+    def test_paragraph_stats_present(self):
+        result = analyze(SAMPLE)
+        ps = result["paragraph_stats"]
+        assert isinstance(ps, dict)
+        assert set(ps.keys()) == {"count", "min", "max", "mean"}
