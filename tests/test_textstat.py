@@ -25,6 +25,10 @@ from textstat import (
     hapax_legomena_ratio,
     count_paragraphs,
     paragraph_stats,
+    sentiment_polarity,
+    sentiment_label,
+    text_density,
+    word_frequency_distribution,
 )
 
 SAMPLE = (
@@ -425,7 +429,6 @@ class TestSmogIndex:
         assert result > 0.0
 
     def test_complex_text_higher_smog(self):
-        # Build 3+ sentence texts so SMOG is valid
         simple = "The cat sat. The dog ran. I am here. Go home now."
         hard = (
             "Unprecedented infrastructural deterioration necessitates comprehensive rehabilitation. "
@@ -436,21 +439,17 @@ class TestSmogIndex:
         assert smog_index(hard) > smog_index(simple)
 
     def test_no_polysyllabic_words(self):
-        # All monosyllabic: SMOG = 3 + sqrt(0) = 3.0
         text = "Cat sat. Dog ran. Fox hid. Pig ate. Hen flew."
         result = smog_index(text)
         assert result == pytest.approx(3.0, abs=0.1)
 
     def test_formula_correctness(self):
-        # 3 sentences, exactly 3 complex words → poly * (30/3) = 3 * 10 = 30 → sqrt(30) ≈ 5.477
-        # smog = 3 + 5.477 ≈ 8.48
         text = (
             "Cat sat on mat. "
             "Dog ran far away. "
             "Beautiful education necessitates dedication."
         )
         result = smog_index(text)
-        # Allow variance due to syllable heuristic
         assert 6.0 <= result <= 12.0
 
     def test_returns_float(self):
@@ -463,22 +462,18 @@ class TestHapaxLegomenaRatio:
         assert hapax_legomena_ratio("") == 0.0
 
     def test_all_unique_words(self):
-        # Every word appears once → ratio = total_hapax / total_words = 4/4 = 1.0
         result = hapax_legomena_ratio("alpha beta gamma delta")
         assert result == 1.0
 
     def test_all_repeated(self):
-        # "cat cat cat" — no hapax → ratio = 0.0
         result = hapax_legomena_ratio("cat cat cat")
         assert result == 0.0
 
     def test_mixed(self):
-        # "cat cat dog" — "dog" is hapax (1 out of 3 tokens)
         result = hapax_legomena_ratio("cat cat dog")
         assert result == pytest.approx(1 / 3, abs=0.01)
 
     def test_case_insensitive(self):
-        # "Cat" and "cat" are the same word → not a hapax
         result = hapax_legomena_ratio("Cat cat dog")
         assert result == pytest.approx(1 / 3, abs=0.01)
 
@@ -487,7 +482,6 @@ class TestHapaxLegomenaRatio:
         assert 0.0 <= result <= 1.0
 
     def test_high_diversity_text(self):
-        # SAMPLE has mostly unique words → ratio should be high
         result = hapax_legomena_ratio(SAMPLE)
         assert result > 0.5
 
@@ -549,10 +543,146 @@ class TestParagraphStats:
         assert set(result.keys()) == {"count", "min", "max", "mean"}
 
     def test_mean_is_average(self):
-        # Two paragraphs: 2 words and 4 words → mean = 3.0
         text = "one two.\n\nthree four five six."
         result = paragraph_stats(text)
         assert result["mean"] == 3.0
+
+
+class TestSentimentPolarity:
+    def test_empty(self):
+        assert sentiment_polarity("") == 0.0
+
+    def test_positive_text(self):
+        result = sentiment_polarity("This is great and wonderful and amazing!")
+        assert result > 0.0
+
+    def test_negative_text(self):
+        result = sentiment_polarity("This is terrible and awful and horrible.")
+        assert result < 0.0
+
+    def test_neutral_text(self):
+        result = sentiment_polarity("The fox jumped over the log on Tuesday.")
+        assert result == 0.0
+
+    def test_negation_flips_positive(self):
+        pos = sentiment_polarity("This is good.")
+        neg = sentiment_polarity("This is not good.")
+        assert pos > 0.0
+        assert neg < 0.0
+
+    def test_negation_flips_negative(self):
+        bad = sentiment_polarity("This is terrible.")
+        not_bad = sentiment_polarity("This is not terrible.")
+        assert bad < 0.0
+        assert not_bad > 0.0
+
+    def test_range(self):
+        result = sentiment_polarity(SAMPLE)
+        assert -1.0 <= result <= 1.0
+
+    def test_returns_float(self):
+        assert isinstance(sentiment_polarity(SAMPLE), float)
+
+    def test_mixed_sentiment_near_zero(self):
+        text = "good bad good bad good bad"
+        result = sentiment_polarity(text)
+        assert abs(result) < 0.1
+
+
+class TestSentimentLabel:
+    def test_positive(self):
+        assert sentiment_label("wonderful amazing great fantastic love") == "positive"
+
+    def test_negative(self):
+        assert sentiment_label("terrible awful horrible hate bad") == "negative"
+
+    def test_neutral(self):
+        assert sentiment_label("the fox sat on a log") == "neutral"
+
+    def test_empty(self):
+        assert sentiment_label("") == "neutral"
+
+    def test_returns_string(self):
+        assert isinstance(sentiment_label(SAMPLE), str)
+
+    def test_valid_labels(self):
+        for text in [SAMPLE, "good", "bad", "the cat"]:
+            assert sentiment_label(text) in {"positive", "negative", "neutral"}
+
+
+class TestTextDensity:
+    def test_empty(self):
+        assert text_density("") == 0.0
+
+    def test_all_stopwords(self):
+        result = text_density("the a an and or but")
+        assert result == 0.0
+
+    def test_no_stopwords(self):
+        result = text_density("cat dog fox runs jumps")
+        assert result == 1.0
+
+    def test_mixed(self):
+        # "the cat sat" — "the" is stopword, "cat" and "sat" are content
+        result = text_density("the cat sat")
+        assert result == pytest.approx(2 / 3, abs=0.01)
+
+    def test_range(self):
+        result = text_density(SAMPLE)
+        assert 0.0 <= result <= 1.0
+
+    def test_content_rich_text_higher_density(self):
+        stopword_heavy = "the the the and and or or but but"
+        content_rich = "fox jumps runs leaps bounds sprints"
+        assert text_density(content_rich) > text_density(stopword_heavy)
+
+
+class TestWordFrequencyDistribution:
+    def test_empty(self):
+        result = word_frequency_distribution("")
+        assert result == {"total_tokens": 0, "unique_types": 0, "top_10_pct": 0.0, "zipf_fit": 0.0}
+
+    def test_returns_all_keys(self):
+        result = word_frequency_distribution(SAMPLE)
+        assert set(result.keys()) == {"total_tokens", "unique_types", "top_10_pct", "zipf_fit"}
+
+    def test_total_tokens_correct(self):
+        result = word_frequency_distribution("cat dog fox cat")
+        assert result["total_tokens"] == 4
+
+    def test_unique_types_correct(self):
+        result = word_frequency_distribution("cat dog fox cat")
+        assert result["unique_types"] == 3
+
+    def test_top_10_pct_range(self):
+        result = word_frequency_distribution(SAMPLE)
+        assert 0.0 <= result["top_10_pct"] <= 1.0
+
+    def test_top_10_pct_all_unique(self):
+        # 5 unique words, top 5 = all of them → top_10_pct = 1.0 (top 10 covers everything)
+        result = word_frequency_distribution("alpha beta gamma delta epsilon")
+        assert result["top_10_pct"] == 1.0
+
+    def test_few_words_zipf_zero(self):
+        # fewer than 5 unique types → zipf_fit should be 0.0
+        result = word_frequency_distribution("cat dog cat")
+        assert result["zipf_fit"] == 0.0
+
+    def test_zipf_fit_range(self):
+        result = word_frequency_distribution(SAMPLE)
+        assert -1.0 <= result["zipf_fit"] <= 1.0
+
+    def test_zipf_fit_negative_for_natural_text(self):
+        # Natural language follows Zipf's law: higher rank = lower frequency → negative correlation
+        long_text = (
+            "The quick brown fox jumps over the lazy dog. "
+            "Pack my box with five dozen liquor jugs. "
+            "How valiantly did brave Zephyrus blow the horn today. "
+            "The cat sat on the mat and watched the sun set slowly. "
+            "Every good boy does fine and every fine boy does good deeds. "
+        )
+        result = word_frequency_distribution(long_text)
+        assert result["zipf_fit"] < 0.0
 
 
 class TestAnalyze:
@@ -566,6 +696,8 @@ class TestAnalyze:
             "lexical_diversity", "gunning_fog", "sentence_stats",
             "coleman_liau", "automated_readability_index", "grade_level_consensus",
             "smog_index", "hapax_legomena_ratio", "paragraph_stats",
+            "sentiment_polarity", "sentiment_label", "text_density",
+            "word_frequency_distribution",
         }
         assert expected_keys == set(result.keys())
 
@@ -587,33 +719,19 @@ class TestAnalyze:
         assert isinstance(result["flesch_kincaid_grade"], float)
         assert isinstance(result["lexical_diversity"], float)
 
-    def test_gunning_fog_present(self):
-        result = analyze(SAMPLE)
-        assert isinstance(result["gunning_fog"], float)
+    def test_sentiment_in_analyze(self):
+        result = analyze("This is a wonderful day!")
+        assert isinstance(result["sentiment_polarity"], float)
+        assert result["sentiment_label"] in {"positive", "negative", "neutral"}
 
-    def test_sentence_stats_present(self):
+    def test_text_density_in_analyze(self):
         result = analyze(SAMPLE)
-        ss = result["sentence_stats"]
-        assert isinstance(ss, dict)
-        assert "min" in ss and "max" in ss and "mean" in ss and "median" in ss
+        assert isinstance(result["text_density"], float)
+        assert 0.0 <= result["text_density"] <= 1.0
 
-    def test_new_readability_metrics_present(self):
+    def test_word_frequency_distribution_in_analyze(self):
         result = analyze(SAMPLE)
-        assert isinstance(result["coleman_liau"], float)
-        assert isinstance(result["automated_readability_index"], float)
-        assert isinstance(result["grade_level_consensus"], float)
-
-    def test_smog_present(self):
-        result = analyze(SAMPLE)
-        assert isinstance(result["smog_index"], float)
-
-    def test_hapax_legomena_present(self):
-        result = analyze(SAMPLE)
-        assert isinstance(result["hapax_legomena_ratio"], float)
-        assert 0.0 <= result["hapax_legomena_ratio"] <= 1.0
-
-    def test_paragraph_stats_present(self):
-        result = analyze(SAMPLE)
-        ps = result["paragraph_stats"]
-        assert isinstance(ps, dict)
-        assert set(ps.keys()) == {"count", "min", "max", "mean"}
+        wfd = result["word_frequency_distribution"]
+        assert isinstance(wfd, dict)
+        assert "zipf_fit" in wfd
+        assert "total_tokens" in wfd

@@ -2,6 +2,7 @@
 
 import re
 import sys
+import math
 import argparse
 from collections import Counter
 from typing import Optional
@@ -108,10 +109,7 @@ def count_complex_words(text: str) -> int:
 
 
 def gunning_fog(text: str) -> float:
-    """Gunning Fog Index — estimated years of schooling to understand the text.
-
-    Formula: 0.4 * ((words/sentences) + 100 * (complex_words/words))
-    """
+    """Gunning Fog Index — estimated years of schooling to understand the text."""
     words = count_words(text)
     sentences = count_sentences(text)
     complex_words = count_complex_words(text)
@@ -145,11 +143,7 @@ def sentence_stats(text: str) -> dict:
 
 
 def coleman_liau_index(text: str) -> float:
-    """Coleman-Liau Index — grade level based on letters and sentences per 100 words.
-
-    Formula: 0.0588 * L - 0.296 * S - 15.8
-    L = avg letters per 100 words; S = avg sentences per 100 words.
-    """
+    """Coleman-Liau Index — grade level based on letters and sentences per 100 words."""
     words = count_words(text)
     sentences = count_sentences(text)
     if words == 0:
@@ -162,10 +156,7 @@ def coleman_liau_index(text: str) -> float:
 
 
 def automated_readability_index(text: str) -> float:
-    """Automated Readability Index (ARI) — grade level from chars/words and words/sentences.
-
-    Formula: 4.71 * (chars/words) + 0.5 * (words/sentences) - 21.43
-    """
+    """Automated Readability Index (ARI) — grade level from chars/words and words/sentences."""
     words = count_words(text)
     sentences = count_sentences(text)
     if words == 0 or sentences == 0:
@@ -189,9 +180,8 @@ def grade_level_consensus(text: str) -> float:
 
 
 def smog_index(text: str) -> float:
-    """SMOG Grade (McLaughlin 1969) — Simple Measure of Gobbledygook.
+    """SMOG Grade — Simple Measure of Gobbledygook.
 
-    Formula: 3 + sqrt(polysyllabic_words * (30 / sentences))
     Returns 0.0 for texts with fewer than 3 sentences (insufficient data).
     """
     sentences = count_sentences(text)
@@ -203,11 +193,7 @@ def smog_index(text: str) -> float:
 
 
 def hapax_legomena_ratio(text: str) -> float:
-    """Proportion of words that appear exactly once (hapax legomena / total words).
-
-    Higher ratio indicates richer, more varied vocabulary.
-    Returns 0.0 for empty text.
-    """
+    """Proportion of words that appear exactly once (hapax legomena / total words)."""
     words = re.findall(r"[A-Za-z']+", text.lower())
     if not words:
         return 0.0
@@ -223,11 +209,7 @@ def count_paragraphs(text: str) -> int:
 
 
 def paragraph_stats(text: str) -> dict:
-    """Return word-count statistics per paragraph: count/min/max/mean.
-
-    Paragraphs are separated by blank lines. Single-block text counts as one paragraph.
-    Returns zeroed dict for empty text.
-    """
+    """Return word-count statistics per paragraph: count/min/max/mean."""
     paragraphs = [p for p in re.split(r'\n\s*\n', text.strip()) if p.strip()]
     if not paragraphs:
         return {"count": 0, "min": 0, "max": 0, "mean": 0.0}
@@ -238,6 +220,151 @@ def paragraph_stats(text: str) -> dict:
         "min": min(lengths),
         "max": max(lengths),
         "mean": round(sum(lengths) / n, 2),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Sentiment polarity (lexicon-based, no external deps)
+# ---------------------------------------------------------------------------
+
+_POSITIVE_WORDS = frozenset({
+    "good", "great", "excellent", "wonderful", "amazing", "fantastic", "love",
+    "happy", "joy", "beautiful", "best", "brilliant", "superb", "perfect",
+    "positive", "nice", "enjoy", "pleased", "glad", "delightful", "awesome",
+    "outstanding", "magnificent", "splendid", "marvelous", "terrific", "fine",
+    "pleasant", "fortunate", "favorable", "win", "success", "triumph",
+})
+
+_NEGATIVE_WORDS = frozenset({
+    "bad", "terrible", "awful", "horrible", "hate", "sad", "ugly", "worst",
+    "poor", "wrong", "failure", "fail", "loss", "lost", "negative", "nasty",
+    "dreadful", "disgrace", "disaster", "problem", "trouble", "difficult",
+    "unfortunate", "unfavorable", "painful", "suffer", "miserable", "evil",
+    "damage", "broken", "useless", "inferior", "mediocre", "flawed",
+})
+
+_NEGATORS = frozenset({
+    "not", "no", "never", "neither", "nor", "nobody", "nothing", "nowhere",
+    "hardly", "scarcely", "barely", "without",
+})
+
+
+def sentiment_polarity(text: str) -> float:
+    """Simple lexicon-based sentiment polarity score in range [-1.0, 1.0].
+
+    Counts positive and negative words from a built-in lexicon, handles
+    single-word negation (e.g. "not good" flips polarity), and normalises
+    by total matched words.  Returns 0.0 for empty or neutral text.
+    """
+    words = re.findall(r"[a-z']+", text.lower())
+    if not words:
+        return 0.0
+
+    score = 0
+    total = 0
+    for i, word in enumerate(words):
+        negated = i > 0 and words[i - 1] in _NEGATORS
+        if word in _POSITIVE_WORDS:
+            score += -1 if negated else 1
+            total += 1
+        elif word in _NEGATIVE_WORDS:
+            score += 1 if negated else -1
+            total += 1
+
+    if total == 0:
+        return 0.0
+    return round(score / total, 3)
+
+
+def sentiment_label(text: str) -> str:
+    """Return 'positive', 'negative', or 'neutral' based on polarity score."""
+    p = sentiment_polarity(text)
+    if p > 0.05:
+        return "positive"
+    if p < -0.05:
+        return "negative"
+    return "neutral"
+
+
+# ---------------------------------------------------------------------------
+# Text density
+# ---------------------------------------------------------------------------
+
+def text_density(text: str) -> float:
+    """Content-word density: ratio of non-stopword words to total words.
+
+    Higher density indicates more information-rich prose (fewer filler words).
+    Returns 0.0 for empty text.
+    """
+    stopwords = {
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to",
+        "for", "of", "with", "is", "it", "as", "be", "by", "this", "that",
+        "was", "are", "were", "from", "not", "have", "has", "had", "i",
+        "you", "he", "she", "we", "they", "its",
+    }
+    words = re.findall(r"[A-Za-z']+", text.lower())
+    if not words:
+        return 0.0
+    content = sum(1 for w in words if w not in stopwords)
+    return round(content / len(words), 3)
+
+
+# ---------------------------------------------------------------------------
+# Zipf / frequency distribution
+# ---------------------------------------------------------------------------
+
+def word_frequency_distribution(text: str) -> dict:
+    """Return word frequency distribution stats.
+
+    Keys:
+        ``total_tokens``   — total word tokens
+        ``unique_types``   — number of distinct word types
+        ``top_10_pct``     — fraction of tokens covered by the 10 most frequent words
+        ``zipf_fit``       — Pearson correlation of log(rank) vs log(freq); near -1.0
+                            means frequency follows Zipf's law closely
+    Returns zeroed dict for texts with fewer than 5 unique word types.
+    """
+    words = re.findall(r"[A-Za-z']+", text.lower())
+    if not words:
+        return {"total_tokens": 0, "unique_types": 0, "top_10_pct": 0.0, "zipf_fit": 0.0}
+
+    freq = Counter(words)
+    unique = len(freq)
+    total = len(words)
+
+    top10 = sum(c for _, c in freq.most_common(10))
+    top_10_pct = round(top10 / total, 3)
+
+    if unique < 5:
+        return {
+            "total_tokens": total,
+            "unique_types": unique,
+            "top_10_pct": top_10_pct,
+            "zipf_fit": 0.0,
+        }
+
+    # Pearson correlation between log(rank) and log(frequency)
+    ranked = [c for _, c in freq.most_common()]
+    log_ranks = [math.log(r + 1) for r in range(unique)]
+    log_freqs = [math.log(f) for f in ranked]
+
+    n = unique
+    mean_r = sum(log_ranks) / n
+    mean_f = sum(log_freqs) / n
+    cov = sum((log_ranks[i] - mean_r) * (log_freqs[i] - mean_f) for i in range(n))
+    std_r = math.sqrt(sum((x - mean_r) ** 2 for x in log_ranks))
+    std_f = math.sqrt(sum((x - mean_f) ** 2 for x in log_freqs))
+
+    if std_r == 0 or std_f == 0:
+        zipf_fit = 0.0
+    else:
+        zipf_fit = round(cov / (std_r * std_f), 3)
+
+    return {
+        "total_tokens": total,
+        "unique_types": unique,
+        "top_10_pct": top_10_pct,
+        "zipf_fit": zipf_fit,
     }
 
 
@@ -262,6 +389,10 @@ def analyze(text: str) -> dict:
         "smog_index": smog_index(text),
         "hapax_legomena_ratio": hapax_legomena_ratio(text),
         "paragraph_stats": paragraph_stats(text),
+        "sentiment_polarity": sentiment_polarity(text),
+        "sentiment_label": sentiment_label(text),
+        "text_density": text_density(text),
+        "word_frequency_distribution": word_frequency_distribution(text),
     }
 
 
@@ -281,6 +412,13 @@ def _format_report(stats: dict, source: str) -> str:
     lines.append(f"  Grade consensus  : {stats['grade_level_consensus']}  (avg of 4 formulas)")
     lines.append(f"  Lexical diversity: {stats['lexical_diversity']}  (unique/total words)")
     lines.append(f"  Hapax legomena   : {stats['hapax_legomena_ratio']}  (once-only words / total)")
+    lines.append(f"  Text density     : {stats['text_density']}  (content words / total)")
+    lines.append(f"  Sentiment        : {stats['sentiment_label']}  (polarity={stats['sentiment_polarity']})")
+    wfd = stats["word_frequency_distribution"]
+    lines.append(
+        f"  Freq dist        : top10={wfd['top_10_pct']}  zipf_fit={wfd['zipf_fit']}"
+        f"  ({wfd['unique_types']} types / {wfd['total_tokens']} tokens)"
+    )
     ss = stats["sentence_stats"]
     lines.append(
         f"  Sentence lengths : min={ss['min']}  max={ss['max']}  "
