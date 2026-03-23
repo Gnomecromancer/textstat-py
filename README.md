@@ -1,76 +1,74 @@
 # textstat
 
-A pure-Python text analysis library. Zero dependencies beyond the standard library.
+Text analysis for Python. Readability scores, vocabulary stats, sentiment, n-grams — no dependencies.
 
-```bash
+```
 pip install textstat-py
 ```
 
-## Features
-
-**Readability:** Flesch Reading Ease, Flesch-Kincaid Grade, Gunning Fog, Coleman-Liau, ARI, SMOG, grade-level consensus
-
-**Vocabulary richness:** lexical diversity, MATTR, Herdan's C, Yule's K, hapax legomena ratio
-
-**Structure:** word/char/sentence/paragraph counts, reading time, sentence length stats, text density
-
-**Sentiment:** polarity score (−1 to +1), sentiment label
-
-**N-grams:** top bigrams/trigrams, n-gram diversity
-
-## Quick start
+## Usage
 
 ```python
 from textstat import analyze, flesch_reading_ease, grade_level_consensus
 
-text = "The quick brown fox jumps over the lazy dog. It did so with considerable grace."
+text = open("essay.txt").read()
 
-print(flesch_reading_ease(text))    # e.g. 72.4
-print(grade_level_consensus(text))  # e.g. 6.1
+print(flesch_reading_ease(text))    # 68.4
+print(grade_level_consensus(text))  # 9.2
 
-stats = analyze(text)               # all metrics in one dict
-print(stats['sentiment_label'])     # neutral
-print(stats['reading_time_min'])    # 0.05
+stats = analyze(text)
+# stats is a flat dict with everything:
+# reading_time_min, sentiment_label, vocabulary_richness, sentence_stats, ...
 ```
 
 ## CLI
 
-```bash
-textstat document.txt          # analyze a file
-cat file.txt | textstat        # pipe text
-textstat --json document.txt   # JSON output
+```
+textstat document.txt
+cat file.txt | textstat
+textstat --json report.txt
 ```
 
-## API
+## Functions
 
-| Function | Returns | Description |
-|----------|---------|-------------|
-| `analyze(text)` | dict | All metrics in one call |
-| `flesch_reading_ease(text)` | float | 0–100, higher = easier |
-| `flesch_kincaid_grade(text)` | float | US grade level |
-| `gunning_fog(text)` | float | Years of education needed |
-| `coleman_liau_index(text)` | float | Grade level by characters |
-| `automated_readability_index(text)` | float | Grade level |
-| `smog_index(text)` | float | Grade level (polysyllables) |
-| `grade_level_consensus(text)` | float | Mean of grade-level scores |
-| `lexical_diversity(text)` | float | Type-token ratio |
-| `mattr(text, window=100)` | float | Moving-average TTR |
-| `herdan_c(text)` | float | Herdan's C |
-| `yule_k(text)` | float | Yule's K |
-| `hapax_legomena_ratio(text)` | float | Fraction of once-occurring words |
-| `sentiment_polarity(text)` | float | −1 (negative) to +1 (positive) |
-| `sentiment_label(text)` | str | "positive" / "neutral" / "negative" |
-| `reading_time(text, wpm=200)` | float | Estimated minutes to read |
-| `top_words(text, n=10)` | list | Most frequent non-stop words |
-| `top_ngrams(text, n=2, k=10)` | list | Most frequent n-grams |
-| `sentence_stats(text)` | dict | min/max/mean/stdev sentence length |
-| `paragraph_stats(text)` | dict | Paragraph count and length stats |
-| `vocabulary_richness(text)` | dict | All richness metrics combined |
-| `ngram_stats(text)` | dict | Bigram and trigram diversity |
+**Readability**
+- `flesch_reading_ease(text)` — 0–100
+- `flesch_kincaid_grade(text)` — US grade level
+- `gunning_fog(text)` — years of education
+- `coleman_liau_index(text)`
+- `automated_readability_index(text)`
+- `smog_index(text)`
+- `grade_level_consensus(text)` — average across all grade metrics
+
+**Vocabulary**
+- `lexical_diversity(text)` — type-token ratio
+- `mattr(text, window=100)` — moving-average TTR
+- `herdan_c(text)`, `yule_k(text)`
+- `hapax_legomena_ratio(text)` — fraction of words appearing once
+- `vocabulary_richness(text)` — all of the above as a dict
+
+**Counts & structure**
+- `count_words(text)`, `count_sentences(text)`, `count_paragraphs(text)`
+- `reading_time(text, wpm=200)`
+- `sentence_stats(text)`, `paragraph_stats(text)`
+
+**Sentiment**
+- `sentiment_polarity(text)` — −1 to +1
+- `sentiment_label(text)` — "positive" / "neutral" / "negative"
+
+**N-grams**
+- `top_ngrams(text, n=2, k=10)`
+- `ngram_diversity(text, n=2)`
+- `ngram_stats(text)`
+
+**Misc**
+- `top_words(text, n=10)`
+- `word_frequency_distribution(text)`
+- `text_density(text)`
 
 ## Requirements
 
-Python 3.8+. No third-party dependencies.
+Python 3.8+
 
 ## License
 
