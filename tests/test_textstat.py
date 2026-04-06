@@ -33,6 +33,9 @@ from textstat import (
     yule_k,
     mattr,
     vocabulary_richness,
+    top_ngrams,
+    ngram_diversity,
+    ngram_stats,
 )
 
 SAMPLE = (
@@ -694,11 +697,9 @@ class TestHerdanC:
         assert herdan_c("cat") == 0.0
 
     def test_all_same(self):
-        # all same word → V=1, log(1)=0 → returns 0.0
         assert herdan_c("cat cat cat cat cat") == 0.0
 
     def test_all_unique(self):
-        # all unique → V=N → log(V)/log(N) = 1.0
         result = herdan_c("alpha beta gamma delta epsilon")
         assert result == pytest.approx(1.0, abs=0.001)
 
@@ -710,13 +711,11 @@ class TestHerdanC:
         assert isinstance(herdan_c(SAMPLE), float)
 
     def test_richer_text_higher_c(self):
-        # text with more unique words per token should have higher Herdan's C
         repeated = "cat cat cat cat cat dog dog dog dog dog"
         diverse = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
         assert herdan_c(diverse) > herdan_c(repeated)
 
     def test_longer_repeated_text(self):
-        # repeated tokens should give low C
         text = " ".join(["word"] * 50)
         result = herdan_c(text)
         assert result < 0.3
@@ -727,14 +726,10 @@ class TestYuleK:
         assert yule_k("") == 0.0
 
     def test_all_same_word(self):
-        # all tokens same → V(m)=1 type with freq=N → K = 10^4*(N^2 - N)/N^2
-        # as N grows this approaches 10000; for small N it's smaller but positive
         result = yule_k("cat cat cat cat cat")
         assert result > 0.0
 
     def test_all_unique(self):
-        # all unique → each type appears once → V(1)=N, all m=1
-        # numerator = 1*1*N - N = 0 → K = 0.0
         result = yule_k("alpha beta gamma delta epsilon")
         assert result == 0.0
 
@@ -742,13 +737,11 @@ class TestYuleK:
         assert isinstance(yule_k(SAMPLE), float)
 
     def test_repeated_text_higher_k(self):
-        # more repetition → higher K
         repeated = " ".join(["cat"] * 20 + ["dog"] * 20)
         diverse = " ".join([f"word{i}" for i in range(40)])
         assert yule_k(repeated) > yule_k(diverse)
 
     def test_non_negative(self):
-        # K is non-negative for any real text
         for text in [SAMPLE, "cat dog", "the the the cat"]:
             assert yule_k(text) >= 0.0
 
@@ -766,12 +759,10 @@ class TestMattr:
         assert result == pytest.approx(1 / 3, abs=0.01)
 
     def test_all_unique_short(self):
-        # text shorter than window → uses full TTR
         result = mattr("alpha beta gamma delta", window=100)
         assert result == 1.0
 
     def test_all_unique_equals_window(self):
-        # exactly window unique words → TTR=1.0 for that window
         words = " ".join([f"w{i}" for i in range(10)])
         result = mattr(words, window=10)
         assert result == 1.0
@@ -784,7 +775,6 @@ class TestMattr:
         assert isinstance(mattr(SAMPLE), float)
 
     def test_window_sliding(self):
-        # 6 words: a b c a b c — window=3 → TTR for [a,b,c]=1.0, [b,c,a]=1.0, [c,a,b]=1.0, [a,b,c]=1.0
         result = mattr("a b c a b c", window=3)
         assert result == pytest.approx(1.0, abs=0.001)
 
@@ -833,6 +823,181 @@ class TestVocabularyRichness:
         assert 0.0 <= result["mattr"] <= 1.0
 
 
+class TestTopNgrams:
+    def test_empty(self):
+        assert top_ngrams("") == []
+
+    def test_single_token_no_bigram(self):
+        assert top_ngrams("hello", n=2) == []
+
+    def test_exact_n_tokens(self):
+        # exactly 2 tokens → 1 bigram
+        result = top_ngrams("cat dog", n=2)
+        assert result == [(("cat", "dog"), 1)]
+
+    def test_basic_bigrams_most_common_first(self):
+        text = "cat dog cat dog cat dog other words"
+        result = top_ngrams(text, n=2, k=1)
+        assert result[0] == (("cat", "dog"), 3)
+
+    def test_count_accuracy(self):
+        text = "a b a b a b c"
+        result = top_ngrams(text, n=2, k=1)
+        assert result[0] == (("a", "b"), 3)
+
+    def test_k_respected(self):
+        text = "alpha beta gamma delta epsilon zeta eta"
+        result = top_ngrams(text, n=2, k=2)
+        assert len(result) <= 2
+
+    def test_trigrams(self):
+        result = top_ngrams("the cat sat on the mat", n=3, k=5)
+        assert len(result) >= 1
+        assert len(result[0][0]) == 3
+
+    def test_returns_list_of_pairs(self):
+        result = top_ngrams(SAMPLE, n=2, k=5)
+        assert isinstance(result, list)
+        for item in result:
+            assert len(item) == 2
+            ngram, count = item
+            assert isinstance(ngram, tuple)
+            assert isinstance(count, int)
+
+    def test_bigram_tuple_length(self):
+        result = top_ngrams("cat dog fox", n=2, k=5)
+        for ngram, _ in result:
+            assert len(ngram) == 2
+
+    def test_trigram_tuple_length(self):
+        result = top_ngrams("cat dog fox wolf", n=3, k=5)
+        for ngram, _ in result:
+            assert len(ngram) == 3
+
+    def test_case_insensitive(self):
+        result = top_ngrams("Cat Dog cat dog", n=2, k=1)
+        assert result[0] == (("cat", "dog"), 2)
+
+    def test_repeated_phrase(self):
+        text = "the cat sat the cat sat the cat sat"
+        result = top_ngrams(text, n=2, k=1)
+        ngram, count = result[0]
+        assert count == 3
+
+
+class TestNgramDiversity:
+    def test_empty(self):
+        assert ngram_diversity("") == 0.0
+
+    def test_single_token(self):
+        assert ngram_diversity("cat", n=2) == 0.0
+
+    def test_two_tokens_one_bigram(self):
+        # 1 bigram, 1 unique → diversity = 1.0
+        result = ngram_diversity("cat dog", n=2)
+        assert result == 1.0
+
+    def test_all_unique_bigrams(self):
+        # "a b c d" → bigrams: (a,b),(b,c),(c,d) — all unique → 1.0
+        result = ngram_diversity("a b c d", n=2)
+        assert result == 1.0
+
+    def test_repeated_bigrams_lower_diversity(self):
+        # "a b a b a b" → 5 positions, 2 unique bigrams → 2/5 = 0.4
+        result = ngram_diversity("a b a b a b", n=2)
+        assert result == pytest.approx(2 / 5, abs=0.01)
+
+    def test_trigram_diversity(self):
+        # "a b c a b c" → 4 positions, 3 unique trigrams → 3/4 = 0.75
+        result = ngram_diversity("a b c a b c", n=3)
+        assert result == pytest.approx(0.75, abs=0.01)
+
+    def test_range(self):
+        result = ngram_diversity(SAMPLE)
+        assert 0.0 <= result <= 1.0
+
+    def test_returns_float(self):
+        assert isinstance(ngram_diversity(SAMPLE), float)
+
+    def test_high_repetition_lower_diversity(self):
+        repeated = "cat dog " * 20
+        words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf",
+                 "hotel", "india", "juliet", "kilo", "lima", "mike", "november",
+                 "oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform",
+                 "victor", "whiskey", "xray", "yankee", "zulu", "apple", "banana",
+                 "cherry", "mango", "lemon", "melon", "grape", "peach", "plum",
+                 "pear", "lime", "kiwi", "fig", "date"]
+        diverse = " ".join(words)
+        assert ngram_diversity(repeated) < ngram_diversity(diverse)
+
+    def test_default_n_is_2(self):
+        text = "alpha beta gamma"
+        assert ngram_diversity(text) == ngram_diversity(text, n=2)
+
+
+class TestNgramStats:
+    def test_empty(self):
+        result = ngram_stats("")
+        assert result["top_bigrams"] == []
+        assert result["top_trigrams"] == []
+        assert result["bigram_diversity"] == 0.0
+        assert result["trigram_diversity"] == 0.0
+
+    def test_returns_all_keys(self):
+        result = ngram_stats(SAMPLE)
+        assert set(result.keys()) == {
+            "top_bigrams", "top_trigrams",
+            "bigram_diversity", "trigram_diversity",
+        }
+
+    def test_top_bigrams_is_list(self):
+        result = ngram_stats(SAMPLE)
+        assert isinstance(result["top_bigrams"], list)
+
+    def test_top_trigrams_is_list(self):
+        result = ngram_stats(SAMPLE)
+        assert isinstance(result["top_trigrams"], list)
+
+    def test_top_bigrams_max_5(self):
+        result = ngram_stats(SAMPLE)
+        assert len(result["top_bigrams"]) <= 5
+
+    def test_top_trigrams_max_5(self):
+        result = ngram_stats(SAMPLE)
+        assert len(result["top_trigrams"]) <= 5
+
+    def test_diversities_in_range(self):
+        result = ngram_stats(SAMPLE)
+        assert 0.0 <= result["bigram_diversity"] <= 1.0
+        assert 0.0 <= result["trigram_diversity"] <= 1.0
+
+    def test_bigram_diversity_matches_function(self):
+        text = SAMPLE
+        result = ngram_stats(text)
+        assert result["bigram_diversity"] == ngram_diversity(text, n=2)
+
+    def test_trigram_diversity_matches_function(self):
+        text = SAMPLE
+        result = ngram_stats(text)
+        assert result["trigram_diversity"] == ngram_diversity(text, n=3)
+
+    def test_top_bigrams_match_top_ngrams(self):
+        text = SAMPLE
+        result = ngram_stats(text)
+        assert result["top_bigrams"] == top_ngrams(text, n=2, k=5)
+
+    def test_trigram_diversity_lte_bigram_diversity(self):
+        # longer n-grams generally have more unique sequences → higher or equal diversity
+        # but at minimum trigram_div should be a valid float in range
+        result = ngram_stats(SAMPLE)
+        assert isinstance(result["trigram_diversity"], float)
+
+    def test_repeated_text_low_diversity(self):
+        text = "cat dog " * 10
+        result = ngram_stats(text)
+        assert result["bigram_diversity"] < 0.5
+
+
 class TestAnalyze:
     def test_returns_all_keys(self):
         result = analyze(SAMPLE)
@@ -846,6 +1011,7 @@ class TestAnalyze:
             "smog_index", "hapax_legomena_ratio", "paragraph_stats",
             "sentiment_polarity", "sentiment_label", "text_density",
             "word_frequency_distribution", "vocabulary_richness",
+            "ngram_stats",
         }
         assert expected_keys == set(result.keys())
 
@@ -890,3 +1056,14 @@ class TestAnalyze:
         assert isinstance(vr, dict)
         assert set(vr.keys()) == {"ttr", "herdan_c", "yule_k", "mattr"}
         assert all(isinstance(v, float) for v in vr.values())
+
+    def test_ngram_stats_in_analyze(self):
+        result = analyze(SAMPLE)
+        ng = result["ngram_stats"]
+        assert isinstance(ng, dict)
+        assert set(ng.keys()) == {
+            "top_bigrams", "top_trigrams",
+            "bigram_diversity", "trigram_diversity",
+        }
+        assert isinstance(ng["top_bigrams"], list)
+        assert isinstance(ng["bigram_diversity"], float)

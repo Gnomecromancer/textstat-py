@@ -442,6 +442,63 @@ def vocabulary_richness(text: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# N-gram analysis
+# ---------------------------------------------------------------------------
+
+def _tokenize(text: str) -> list:
+    """Lowercase word tokens (letters and apostrophes only)."""
+    return re.findall(r"[A-Za-z']+", text.lower())
+
+
+def top_ngrams(text: str, n: int = 2, k: int = 10) -> list:
+    """Return the k most common n-grams as list of (ngram_tuple, count) pairs.
+
+    Args:
+        text: Input text.
+        n:    N-gram size (2=bigrams, 3=trigrams, etc.).
+        k:    Maximum number of results to return.
+
+    Returns an empty list when the text has fewer than n tokens.
+    """
+    tokens = _tokenize(text)
+    if len(tokens) < n:
+        return []
+    ngrams = [tuple(tokens[i: i + n]) for i in range(len(tokens) - n + 1)]
+    return Counter(ngrams).most_common(k)
+
+
+def ngram_diversity(text: str, n: int = 2) -> float:
+    """Unique n-grams / total n-gram positions (n-gram type-token ratio).
+
+    Values near 1.0 indicate the text avoids repeating phrases.
+    Returns 0.0 when the text has fewer than n tokens.
+    """
+    tokens = _tokenize(text)
+    total = len(tokens) - n + 1
+    if total <= 0:
+        return 0.0
+    ngrams = [tuple(tokens[i: i + n]) for i in range(total)]
+    return round(len(set(ngrams)) / total, 3)
+
+
+def ngram_stats(text: str) -> dict:
+    """Bundle of n-gram statistics.
+
+    Keys:
+        ``top_bigrams``       — up to 5 most frequent bigrams as (tuple, count) pairs
+        ``top_trigrams``      — up to 5 most frequent trigrams
+        ``bigram_diversity``  — unique bigrams / total bigram positions
+        ``trigram_diversity`` — unique trigrams / total trigram positions
+    """
+    return {
+        "top_bigrams": top_ngrams(text, n=2, k=5),
+        "top_trigrams": top_ngrams(text, n=3, k=5),
+        "bigram_diversity": ngram_diversity(text, n=2),
+        "trigram_diversity": ngram_diversity(text, n=3),
+    }
+
+
 def analyze(text: str) -> dict:
     """Return a combined stats dict for the given text."""
     return {
@@ -468,6 +525,7 @@ def analyze(text: str) -> dict:
         "text_density": text_density(text),
         "word_frequency_distribution": word_frequency_distribution(text),
         "vocabulary_richness": vocabulary_richness(text),
+        "ngram_stats": ngram_stats(text),
     }
 
 
@@ -508,6 +566,13 @@ def _format_report(stats: dict, source: str) -> str:
     lines.append(
         f"  Paragraphs       : {ps['count']}  (min={ps['min']}  max={ps['max']}  mean={ps['mean']} words)"
     )
+    ng = stats["ngram_stats"]
+    if ng["top_bigrams"]:
+        top_bi = ", ".join(" ".join(g) for g, _ in ng["top_bigrams"][:3])
+        lines.append(
+            f"  N-grams          : bigram_div={ng['bigram_diversity']}  "
+            f"trigram_div={ng['trigram_diversity']}  top_bigrams=[{top_bi}]"
+        )
     if stats["top_words"]:
         top = ", ".join(f"{w}({c})" for w, c in stats["top_words"])
         lines.append(f"  Top words        : {top}")
@@ -520,6 +585,7 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument("file", nargs="?", help="Text file to analyze (default: stdin)")
     parser.add_argument("--wpm", type=int, default=200, help="Reading speed (words/min)")
+    parser.add_argument("--json", action="store_true", help="Output results as JSON")
     args = parser.parse_args(argv)
 
     if args.file:
@@ -539,7 +605,12 @@ def main(argv: Optional[list] = None) -> int:
 
     stats = analyze(text)
     stats["reading_time_min"] = reading_time(text, wpm=args.wpm)
-    print(_format_report(stats, source))
+
+    if args.json:
+        import json
+        print(json.dumps(stats, default=list))
+    else:
+        print(_format_report(stats, source))
     return 0
 
 
