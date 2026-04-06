@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "textstat-py"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pure-Python text analysis: readability, vocabulary richness, sentiment, n-grams"
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,6 +36,5 @@ Homepage = "https://github.com/Gnomecromancer/textstat-py"
 Repository = "https://github.com/Gnomecromancer/textstat-py"
 Issues = "https://github.com/Gnomecromancer/textstat-py/issues"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["textstat*"]
+[tool.setuptools]
+py-modules = ["textstat"]
