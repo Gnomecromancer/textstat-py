@@ -36,6 +36,8 @@ from textstat import (
     top_ngrams,
     ngram_diversity,
     ngram_stats,
+    passive_voice_ratio,
+    adverb_density,
 )
 
 SAMPLE = (
@@ -1011,7 +1013,7 @@ class TestAnalyze:
             "smog_index", "hapax_legomena_ratio", "paragraph_stats",
             "sentiment_polarity", "sentiment_label", "text_density",
             "word_frequency_distribution", "vocabulary_richness",
-            "ngram_stats",
+            "ngram_stats", "passive_voice_ratio", "adverb_density",
         }
         assert expected_keys == set(result.keys())
 
@@ -1067,3 +1069,52 @@ class TestAnalyze:
         }
         assert isinstance(ng["top_bigrams"], list)
         assert isinstance(ng["bigram_diversity"], float)
+
+class TestPassiveVoiceRatio:
+    def test_empty(self):
+        assert passive_voice_ratio("") == 0.0
+
+    def test_active_only(self):
+        text = "The dog chased the cat. She wrote the report. He runs every morning."
+        assert passive_voice_ratio(text) == 0.0
+
+    def test_passive_detected(self):
+        text = "The report was written by Alice. The code was reviewed."
+        ratio = passive_voice_ratio(text)
+        assert ratio > 0.0
+
+    def test_mixed(self):
+        active = "She runs every day. He built the system."
+        passive = "The file was deleted. The function was called by the server."
+        assert passive_voice_ratio(passive) > passive_voice_ratio(active)
+
+    def test_in_analyze(self):
+        result = analyze(SAMPLE)
+        assert "passive_voice_ratio" in result
+        assert isinstance(result["passive_voice_ratio"], float)
+        assert 0.0 <= result["passive_voice_ratio"] <= 1.0
+
+
+class TestAdverbDensity:
+    def test_empty(self):
+        assert adverb_density("") == 0.0
+
+    def test_no_adverbs(self):
+        text = "The cat sat on the mat. Dogs run fast."
+        assert adverb_density(text) == 0.0
+
+    def test_adverbs_detected(self):
+        text = "She ran quickly and breathed heavily while frantically searching."
+        density = adverb_density(text)
+        assert density > 0.0
+
+    def test_stopword_ly_excluded(self):
+        # "only", "early", "really" are in _LY_STOPWORDS — shouldn't count
+        text = "Only early birds really matter."
+        assert adverb_density(text) == 0.0
+
+    def test_in_analyze(self):
+        result = analyze(SAMPLE)
+        assert "adverb_density" in result
+        assert isinstance(result["adverb_density"], float)
+        assert 0.0 <= result["adverb_density"] <= 1.0

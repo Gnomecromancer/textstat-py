@@ -499,6 +499,56 @@ def ngram_stats(text: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Writing quality signals
+# ---------------------------------------------------------------------------
+
+_BE_FORMS = frozenset({"am", "is", "are", "was", "were", "be", "been", "being"})
+_PAST_PARTICIPLE_SUFFIXES = ("ed", "en", "wn", "rn", "ne", "lt", "pt", "nt")
+_LY_STOPWORDS = frozenset({
+    "only", "early", "likely", "family", "daily", "really", "already",
+    "nearly", "clearly", "simply", "finally", "usually", "roughly",
+})
+
+
+def passive_voice_ratio(text: str) -> float:
+    """Fraction of sentences containing a passive construction.
+
+    Detects ``be`` verb followed (within 3 tokens) by a past participle
+    (word ending in -ed, -en, -wn, etc.).  Handles common patterns:
+    "was written", "is being done", "has been deleted".
+
+    Returns a value in [0.0, 1.0]; 0.0 for empty or single-word text.
+    """
+    parts = [p.strip() for p in re.split(r'[.!?]+', text.strip()) if p.strip()]
+    if not parts:
+        return 0.0
+    passive_count = 0
+    for sentence in parts:
+        tokens = re.findall(r"[a-z']+", sentence.lower())
+        for i, tok in enumerate(tokens):
+            if tok in _BE_FORMS:
+                window = tokens[i + 1: i + 4]
+                for w in window:
+                    if any(w.endswith(sfx) for sfx in _PAST_PARTICIPLE_SUFFIXES) and len(w) > 3:
+                        passive_count += 1
+                        break
+    return round(passive_count / len(parts), 3)
+
+
+def adverb_density(text: str) -> float:
+    """Fraction of words that are likely adverbs (end in -ly, not stopwords).
+
+    High adverb density (> 0.05) often signals weak writing — adverbs patching
+    weak verbs ("ran quickly" vs "sprinted").  Returns 0.0 for empty text.
+    """
+    words = re.findall(r"[a-z']+", text.lower())
+    if not words:
+        return 0.0
+    adverbs = [w for w in words if w.endswith("ly") and w not in _LY_STOPWORDS and len(w) > 3]
+    return round(len(adverbs) / len(words), 3)
+
+
 def analyze(text: str) -> dict:
     """Return a combined stats dict for the given text."""
     return {
@@ -526,6 +576,8 @@ def analyze(text: str) -> dict:
         "word_frequency_distribution": word_frequency_distribution(text),
         "vocabulary_richness": vocabulary_richness(text),
         "ngram_stats": ngram_stats(text),
+        "passive_voice_ratio": passive_voice_ratio(text),
+        "adverb_density": adverb_density(text),
     }
 
 
@@ -576,6 +628,37 @@ def _format_report(stats: dict, source: str) -> str:
     if stats["top_words"]:
         top = ", ".join(f"{w}({c})" for w, c in stats["top_words"])
         lines.append(f"  Top words        : {top}")
+    lines.append(f"  Passive voice    : {stats['passive_voice_ratio']}  (fraction of sentences)")
+    lines.append(f"  Adverb density   : {stats['adverb_density']}  (>0.05 may signal weak verbs)")
+    return "\n".join(lines)
+
+
+def _compare_report(s1: dict, s2: dict, name1: str, name2: str) -> str:
+    _COMPARE_KEYS = [
+        ("words", "Words"),
+        ("sentences", "Sentences"),
+        ("reading_time_min", "Reading time (min)"),
+        ("flesch_reading_ease", "Flesch ease"),
+        ("grade_level_consensus", "Grade level"),
+        ("lexical_diversity", "Lexical diversity"),
+        ("sentiment_polarity", "Sentiment polarity"),
+        ("passive_voice_ratio", "Passive voice ratio"),
+        ("adverb_density", "Adverb density"),
+        ("text_density", "Text density"),
+    ]
+    w = 26
+    lines = [
+        f"{'Metric':<{w}}  {'A: ' + name1:<20}  {'B: ' + name2:<20}  Delta",
+        "-" * (w + 50),
+    ]
+    for key, label in _COMPARE_KEYS:
+        v1, v2 = s1.get(key, 0), s2.get(key, 0)
+        try:
+            delta = round(float(v2) - float(v1), 3)
+            delta_str = f"+{delta}" if delta > 0 else str(delta)
+        except (TypeError, ValueError):
+            delta_str = "n/a"
+        lines.append(f"{label:<{w}}  {str(v1):<20}  {str(v2):<20}  {delta_str}")
     return "\n".join(lines)
 
 
@@ -584,9 +667,26 @@ def main(argv: Optional[list] = None) -> int:
         description="Analyze text statistics from a file or stdin."
     )
     parser.add_argument("file", nargs="?", help="Text file to analyze (default: stdin)")
+    parser.add_argument("--compare", metavar="FILE2", help="Compare FILE against FILE2")
     parser.add_argument("--wpm", type=int, default=200, help="Reading speed (words/min)")
     parser.add_argument("--json", action="store_true", help="Output results as JSON")
     args = parser.parse_args(argv)
+
+    if args.compare:
+        if not args.file:
+            print("error: --compare requires a base file argument", file=sys.stderr)
+            return 1
+        try:
+            with open(args.file, encoding="utf-8") as fh:
+                text1 = fh.read()
+            with open(args.compare, encoding="utf-8") as fh:
+                text2 = fh.read()
+        except FileNotFoundError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        s1, s2 = analyze(text1), analyze(text2)
+        print(_compare_report(s1, s2, args.file, args.compare))
+        return 0
 
     if args.file:
         try:
